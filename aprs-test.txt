@@ -1,0 +1,5 @@
+VE7MJC Test Data
+Recorded directly from TNC-X at NRGH for approx 1 hour 
+31 January 2016 on 144.390
+
+Should be KISS frames
