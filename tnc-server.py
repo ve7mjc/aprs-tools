@@ -100,6 +100,7 @@ class Server:
 		# but do not get stuck blocking at select
 		try:
 			self.tncSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			self.tncSocket.setsockopt( socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 			self.tncSocket.connect((self.tncHost,self.tncPort))
 			logging.info("Connected to TNC at {}:{}".format(self.tncHost,self.tncPort))
 			self.tncSocket.setblocking(False)
@@ -126,17 +127,17 @@ class Server:
 		self.inputs = [] # Sockets to which we expect to read
 		self.tncConnected = False
 		
-		server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		server.setblocking(0)
+		self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.server.setblocking(0)
 
 		try:
-			server.bind((self.listenHost,self.listenPort))
-			server.listen(5)
+			self.server.bind((self.listenHost,self.listenPort))
+			self.server.listen(5)
 			logging.info("Listening for connections on TCP/{}".format(self.listenPort))
-			self.inputs.append(server)
+			self.inputs.append(self.server)
 		except socket.error, (value,message):
-			if server:
-				server.close()
+			if self.server:
+				self.server.close()
 			logging.error("Unable to bind local socket: {}".format(message))
 			sys.exit(1)
 
@@ -156,11 +157,12 @@ class Server:
 			# Handle inputs
 			for s in readable:
 		
-				if s is server:
+				if s is self.server:
 					
 					# A "readable" server socket is ready to accept a connection
 					connection, client_address = s.accept()
 					connection.setblocking(0)
+					connection.setsockopt( socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 					self.outboundQueues[connection] = Queue.Queue()
 					self.inboundQueues[connection] = Queue.Queue()
 					self.receiveBuffer[connection] = ""
@@ -181,15 +183,17 @@ class Server:
 							self.tncConnected = False
 							logging.error("Caught exception reading from TNC, assuming disconnected")
 						logging.error(e)
-					finally:
-						data = ""
-					if data:
+						readError = True
+						
+					if not readError:
+					
 						self.receiveBuffer[s] += data
 						self.processReceiveBuffer(s)
+					
 					else:
 						
 						if s is self.tncSocket:
-							
+
 							self.tncConnected = False
 							
 							self.inputs.remove(s)
@@ -197,7 +201,7 @@ class Server:
 							s.close()
 							
 							# we maintain our relationship with the tncSocket
-							logging.error("TNC connection lost!")
+							logging.error("TNC connection lost! Reconnecting.")
 							time.sleep(1) # arbitrary delay to prevent an explosion
 							# lets try to reconnect
 							self.connectToTnc()
@@ -298,8 +302,11 @@ def main():
 	logging.basicConfig(level=logging.DEBUG, format='%(message)s',)
 	
 	server = Server(tncAddress, serverAddress, verbose)
-	server.run()
-  
+	try:
+		server.run()
+  	except KeyboardInterrupt:
+		server.server.close()
+
 
 if __name__ == "__main__":
     try:
